@@ -1,0 +1,5 @@
+Elija una opcion:
+R = Reservar mesa
+M = Mostrar menu
+P = Pagar
+S = Salir

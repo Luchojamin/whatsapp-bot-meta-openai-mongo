@@ -1,0 +1,7 @@
+Este es el menu de opciones del la Picaa´ Don Lucho :
+1 = Menu 1 - PDF Document
+2 = Menu 2 - Image
+3 = Menu 3 - Consultar a CHATGPT
+4 = Menu 4
+5 = Menu 5
+0 = Volver al menu principal
