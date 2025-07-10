@@ -216,6 +216,7 @@ const main = async () => {
                         <li><strong>POST</strong> /v1/register - Trigger registration flow</li>
                         <li><strong>POST</strong> /v1/samples - Trigger samples flow</li>
                         <li><strong>POST</strong> /v1/blacklist - Manage blacklist</li>
+                        <li><strong>POST</strong> <your_domain>/webhook - Webhook - Example: http://localhost:3008/webhook OR https://your-railway-domain/webhook</li>
                     </ul>
                 </body>
             </html>
