@@ -65,5 +65,7 @@ ISC
 - [OpenAI](https://openai.com/)
 - [MongoDB](https://www.mongodb.com/)
 
+> **Note:** For the best documentation and references about this project, please use the [`desa` branch](https://github.com/Luchojamin/whatsapp-bot-meta-openai-mongo/tree/desa).
+
 ---
 Feel free to contribute or open issues!
