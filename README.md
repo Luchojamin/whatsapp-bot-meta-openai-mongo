@@ -57,6 +57,12 @@ This project is a TypeScript-based WhatsApp bot leveraging the BuilderBot framew
 See `.env-example` for required variables:
 - `JWT_TOKEN`, `NUMBER_ID`, `VERIFY_TOKEN`, `VERSION`, `PORT`, `OPENAI_API_KEY`, `MONGO_DB_URI`, `MONGO_DB_NAME`
 
+## Deployment
+
+A good option for deploying this project is [Railway.com](https://railway.com), which offers a simple and scalable way to host Node.js applications with environment variable support and easy integration with MongoDB and other services.
+
+For a step-by-step guide, check out this explanatory video: [Deploying on Railway.com (YouTube)](https://youtu.be/twia5bKW6eg?si=UOHPiP9YTBnPVWH-&t=3276)
+
 ## License
 ISC
 
