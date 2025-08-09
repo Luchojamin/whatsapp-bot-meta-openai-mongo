@@ -8,6 +8,9 @@ import { MongoAdapter as Database } from '@builderbot/database-mongo'
 const MONGO_DB_NAME = 'db_bot'; */
 import 'dotenv/config'
 import { readFileSync } from 'fs'
+import fs from 'fs';
+import fetch from 'node-fetch';
+import { MongoClient, GridFSBucket, ObjectId } from 'mongodb';
 
 import chat from './chatGPT.js'
 import { handlerAI } from './myWhisper.js'
@@ -16,6 +19,144 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const PORT = process.env.PORT ?? 3008
+
+// MongoDB GridFS setup
+let gridFSBucket: GridFSBucket;
+
+const initializeGridFS = async () => {
+    const client = new MongoClient(process.env.MONGO_DB_URI!);
+    await client.connect();
+    const db = client.db(process.env.MONGO_DB_NAME);
+    gridFSBucket = new GridFSBucket(db);
+    console.log('GridFS initialized');
+};
+
+// Function to store media in MongoDB GridFS
+const storeMediaInGridFS = async (buffer: Buffer, filename: string, metadata: any) => {
+    const uploadStream = gridFSBucket.openUploadStream(filename, {
+        metadata: {
+            ...metadata,
+            uploadDate: new Date()
+        }
+    });
+    
+    uploadStream.end(buffer);
+    
+    return new Promise((resolve, reject) => {
+        uploadStream.on('finish', () => {
+            resolve(uploadStream.id);
+        });
+        uploadStream.on('error', reject);
+    });
+};
+
+// Function to retrieve media from GridFS
+const getMediaFromGridFS = async (fileId: string) => {
+    const downloadStream = gridFSBucket.openDownloadStream(new ObjectId(fileId));
+    const chunks: Buffer[] = [];
+    
+    return new Promise<Buffer>((resolve, reject) => {
+        downloadStream.on('data', (chunk) => chunks.push(chunk));
+        downloadStream.on('end', () => resolve(Buffer.concat(chunks)));
+        downloadStream.on('error', reject);
+    });
+};
+
+// Helper function to determine media type from MIME type
+const getMediaTypeFromMime = (mimeType: string): string => {
+    if (mimeType.startsWith('image/')) return 'image';
+    if (mimeType.startsWith('video/')) return 'video';
+    if (mimeType.startsWith('audio/')) return 'audio';
+    if (mimeType.startsWith('application/')) return 'document';
+    return 'unknown';
+};
+
+// Helper function to determine if media should be backed up
+const shouldBackupMedia = (mediaType: string): boolean => {
+    // Always backup voice notes (important for conversation history)
+    if (mediaType === 'audio') return true;
+    
+    // Backup documents (business critical)
+    if (mediaType === 'document') return true;
+    
+    // Don't backup images/videos by default (can be changed later)
+    if (mediaType === 'image' || mediaType === 'video') return false;
+    
+    return false;
+};
+
+// Function to store media metadata in MongoDB
+const storeMediaMetadata = async (mediaData: any) => {
+    const client = new MongoClient(process.env.MONGO_DB_URI!);
+    await client.connect();
+    const db = client.db(process.env.MONGO_DB_NAME);
+    const collection = db.collection('media_references');
+    
+    const mediaReference = {
+        mediaId: mediaData.mediaId,
+        mimeType: mediaData.mimeType,
+        size: mediaData.size,
+        from: mediaData.from,
+        messageId: mediaData.messageId,
+        originalUrl: mediaData.originalUrl,
+        type: mediaData.type,
+        timestamp: new Date(),
+        // Optional fields
+        transcription: mediaData.transcription || null,
+        thumbnailUrl: mediaData.thumbnailUrl || null,
+        metadata: {
+            width: mediaData.width || null,
+            height: mediaData.height || null,
+            duration: mediaData.duration || null,
+            language: mediaData.language || null,
+            filename: mediaData.filename || null
+        },
+        // Backup flags
+        needsBackup: mediaData.needsBackup || false,
+        backupStatus: mediaData.backupStatus || 'pending',
+        backupDate: mediaData.backupDate || null
+    };
+    
+    const result = await collection.insertOne(mediaReference);
+    console.log(`Media metadata stored with ID: ${result.insertedId}`);
+    return result.insertedId;
+};
+
+// Function to get media metadata by user
+const getMediaMetadataByUser = async (phoneNumber: string) => {
+    const client = new MongoClient(process.env.MONGO_DB_URI!);
+    await client.connect();
+    const db = client.db(process.env.MONGO_DB_NAME);
+    const collection = db.collection('media_references');
+    
+    const mediaList = await collection.find({ from: phoneNumber }).toArray();
+    return mediaList;
+};
+
+// Function to get media metadata by type
+const getMediaMetadataByType = async (mediaType: string) => {
+    const client = new MongoClient(process.env.MONGO_DB_URI!);
+    await client.connect();
+    const db = client.db(process.env.MONGO_DB_NAME);
+    const collection = db.collection('media_references');
+    
+    const mediaList = await collection.find({ type: mediaType }).toArray();
+    return mediaList;
+};
+
+// Function to get media that needs backup
+const getMediaNeedingBackup = async () => {
+    const client = new MongoClient(process.env.MONGO_DB_URI!);
+    await client.connect();
+    const db = client.db(process.env.MONGO_DB_NAME);
+    const collection = db.collection('media_references');
+    
+    const mediaList = await collection.find({ 
+        needsBackup: true, 
+        backupStatus: 'pending' 
+    }).toArray();
+    return mediaList;
+};
 
 const menuFromFile = readFileSync(join(__dirname, '../mensajes/menu.txt'), 'utf-8')
 const menuPrincipalFromFile = readFileSync(join(__dirname, '../mensajes/menuPrincipal.txt'), 'utf-8')
@@ -35,10 +176,20 @@ const voiceNoteFlow = addKeyword(EVENTS.VOICE_NOTE).addAnswer('Give me a second 
     async (ctx, { gotoFlow, fallBack, flowDynamic }) => {
         console.log("ctx audio =>",ctx)
         try {
-            const text = await handlerAI(ctx);
-            console.log("text=>",text)
-            if (text && text !== "Error processing voice message") {
-                await flowDynamic(`I heard: "${text}"`);
+            const result = await handlerAI(ctx);
+            console.log("result=>", result)
+            
+            if (result && typeof result === 'object' && result.text && result.text !== "Error processing voice message") {
+                await flowDynamic(`I heard: "${result.text}"`);
+                
+                // Store voice note metadata in MongoDB
+                if (result.metadata) {
+                    const metadataId = await storeMediaMetadata(result.metadata);
+                    await flowDynamic(`Voice note metadata stored! ID: ${metadataId}`);
+                }
+                
+            } else if (typeof result === 'string' && result !== "Error processing voice message") {
+                await flowDynamic(`I heard: "${result}"`);
             } else {
                 await flowDynamic("Sorry, I couldn't process your voice message. Please try again.");
             }
@@ -161,13 +312,87 @@ const welcomeFlow = addKeyword("Lucho")
             ctxfn.flowDynamic('Your text is not include hey')
          }        
     });
-const mediaFlow = addKeyword(EVENTS.MEDIA).addAnswer('I received a media image/video')
+    
+const mediaFlow = addKeyword(EVENTS.MEDIA)
+    .addAnswer('I received a media image/video',
+        null,
+        async (ctx, { gotoFlow, fallBack, flowDynamic }) => {
+            console.log("Media ctx =>", ctx)
+            
+            try {
+                // Get media ID from context
+                const mediaId = ctx.fileData?.id;
+                if (!mediaId) {
+                    console.error('No media ID found in ctx.fileData');
+                    await flowDynamic("Sorry, I couldn't process the media.");
+                    return;
+                }
+
+                const WHATSAPP_TOKEN = process.env.JWT_TOKEN;
+                if (!WHATSAPP_TOKEN) {
+                    console.error('No WhatsApp token found');
+                    await flowDynamic("Server configuration error.");
+                    return;
+                }
+
+                // Get media URL from Graph API
+                const metaUrl = `https://graph.facebook.com/v22.0/${mediaId}`;
+                const metaRes = await fetch(metaUrl, {
+                    headers: {
+                        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+                    },
+                });
+                const metaData = await metaRes.json() as any;
+                
+                if (!metaData.url) {
+                    console.error('No media URL found:', metaData);
+                    await flowDynamic("Could not access the media file.");
+                    return;
+                }
+
+                // Determine media type and size
+                const mimeType = metaData.mime_type || 'unknown';
+                const fileSize = metaData.file_size || 0;
+                const mediaType = getMediaTypeFromMime(mimeType);
+
+                // Store metadata only (no file download)
+                const mediaData = {
+                    mediaId: mediaId,
+                    mimeType: mimeType,
+                    size: fileSize,
+                    from: ctx.from,
+                    messageId: ctx.key?.id,
+                    originalUrl: metaData.url,
+                    type: mediaType,
+                    filename: `media-${Date.now()}-${mediaId}.${mimeType.split('/')[1] || 'bin'}`,
+                    // Optional fields based on media type
+                    needsBackup: shouldBackupMedia(mediaType),
+                    backupStatus: 'pending'
+                };
+
+                // Store metadata in MongoDB
+                const metadataId = await storeMediaMetadata(mediaData);
+                console.log(`Media metadata stored with ID: ${metadataId}`);
+
+                await flowDynamic(`Media received and metadata stored! ID: ${mediaId}`);
+                await flowDynamic(`Type: ${mediaType}, Size: ${Math.round(fileSize / 1024)}KB`);
+                await flowDynamic(`Metadata ID: ${metadataId}`);
+                
+            } catch (error) {
+                console.error("Error processing media:", error);
+                await flowDynamic("Sorry, there was an error processing your media.");
+            }
+        }
+    )
 const documentFlow = addKeyword(EVENTS.DOCUMENT).addAnswer("I can't read this document right now")
 const locationFlow = addKeyword(EVENTS.LOCATION).addAnswer("I have received your location!")
 //const voiceNoteFlow2 = addKeyword(EVENTS.VOICE_NOTE).addAnswer('Give me a second to hear you!')
 
 
 const main = async () => {
+    // Initialize GridFS for media storage
+    await initializeGridFS();
+    
     const adapterFlow = createFlow([
         bievenidaFlow,
         menuPrincipalFlow,
@@ -187,7 +412,8 @@ const main = async () => {
         jwtToken: process.env.JWT_TOKEN, 
         numberId: process.env.NUMBER_ID,
         verifyToken: process.env.VERIFY_TOKEN,
-        version: process.env.VERSION
+        version: process.env.VERSION,
+        webhookPath: '/whatsapp/webhook'  // Custom webhook path
     })
     //const adapterDB = new Database();
     const adapterDB = new Database({
@@ -216,6 +442,10 @@ const main = async () => {
                         <li><strong>POST</strong> /v1/register - Trigger registration flow</li>
                         <li><strong>POST</strong> /v1/samples - Trigger samples flow</li>
                         <li><strong>POST</strong> /v1/blacklist - Manage blacklist</li>
+                        <li><strong>GET</strong> /v1/media - Get media metadata</li>
+                        <li><strong>GET</strong> /v1/media?user=1234567890 - Get user's media</li>
+                        <li><strong>GET</strong> /v1/media?type=voice_note - Get voice notes</li>
+                        <li><strong>GET</strong> /v1/media?backup=true - Get media needing backup</li>
                     </ul>
                 </body>
             </html>
@@ -260,6 +490,67 @@ const main = async () => {
             return res.end(JSON.stringify({ status: 'ok', number, intent }))
         })
     )
+
+    // Endpoint to get media metadata
+    adapterProvider.server.get('/v1/media', async (req, res) => {
+        try {
+            const { user, type, backup } = req.query;
+            let mediaList;
+
+            if (user) {
+                mediaList = await getMediaMetadataByUser(user as string);
+            } else if (type) {
+                mediaList = await getMediaMetadataByType(type as string);
+            } else if (backup === 'true') {
+                mediaList = await getMediaNeedingBackup();
+            } else {
+                // Get all media metadata
+                const client = new MongoClient(process.env.MONGO_DB_URI!);
+                await client.connect();
+                const db = client.db(process.env.MONGO_DB_NAME);
+                const collection = db.collection('media_references');
+                mediaList = await collection.find({}).limit(50).toArray();
+            }
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ 
+                status: 'ok', 
+                count: mediaList.length, 
+                media: mediaList 
+            }));
+        } catch (error) {
+            console.error('Error getting media metadata:', error);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ 
+                status: 'error', 
+                message: 'Failed to get media metadata' 
+            }));
+        }
+    })
+
+    // Manual webhook endpoints for custom path
+    adapterProvider.server.get('/whatsapp/webhook', (req, res) => {
+        // Webhook verification endpoint
+        const mode = req.query['hub.mode']
+        const token = req.query['hub.verify_token']
+        const challenge = req.query['hub.challenge']
+
+        if (mode === 'subscribe' && token === process.env.VERIFY_TOKEN) {
+            console.log('Webhook verified!')
+            res.writeHead(200, { 'Content-Type': 'text/plain' })
+            res.end(challenge)
+        } else {
+            console.log('Webhook verification failed!')
+            res.writeHead(403)
+            res.end()
+        }
+    })
+
+    adapterProvider.server.post('/whatsapp/webhook', handleCtx(async (bot, req, res) => {
+        // This will handle incoming WhatsApp messages
+        // The handleCtx function will process the message and route it to appropriate flows
+        return res.end('OK')
+    }))
 
     httpServer(+PORT)
 }

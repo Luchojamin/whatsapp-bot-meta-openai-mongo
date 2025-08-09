@@ -1,16 +1,33 @@
 {
-  "name": "base-bailey-json",
-  "version": "1.0.0",
-  "description": "",
+  "name": "whatsapp-bot-meta-openai-mongo",
+  "version": "2.0.0",
+  "description": "A sophisticated TypeScript-based WhatsApp bot leveraging BuilderBot framework, Meta WhatsApp Business API, OpenAI for AI-powered responses, and MongoDB for efficient metadata storage",
   "main": "dist/app.js",
   "type": "module",
   "scripts": {
     "start": "node ./dist/app.js",
     "lint": "eslint . --no-ignore",
     "dev": "npm run lint && nodemon ./src/app.ts",
-    "build": "npx rollup -c"
+    "build": "npx rollup -c",
+    "test": "echo \"No tests specified\" && exit 0",
+    "clean": "rm -rf dist tmp",
+    "docker:build": "docker build -t whatsapp-bot .",
+    "docker:run": "docker run -p 3008:3008 whatsapp-bot"
   },
-  "keywords": [],
+  "keywords": [
+    "whatsapp",
+    "bot",
+    "meta",
+    "openai",
+    "mongodb",
+    "typescript",
+    "builderbot",
+    "ai",
+    "chatbot",
+    "voice-transcription",
+    "media-storage",
+    "webhook"
+  ],
   "dependencies": {
     "@adiwajshing/baileys": "^5.0.0",
     "@builderbot/bot": "1.2.9",
@@ -18,7 +35,10 @@
     "@builderbot/provider-meta": "1.2.9",
     "dotenv": "^17.0.1",
     "node-fetch": "^3.3.2",
-    "openai": "^3.3.0"
+    "openai": "^3.3.0",
+    "mongodb": "^6.3.0",
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "fluent-ffmpeg": "^2.1.2"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",
@@ -32,6 +52,26 @@
     "tsx": "^4.7.1",
     "typescript": "^5.4.3"
   },
-  "author": "",
-  "license": "ISC"
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/whatsapp-bot-meta-openai-mongo.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/whatsapp-bot-meta-openai-mongo/issues"
+  },
+  "homepage": "https://github.com/your-username/whatsapp-bot-meta-openai-mongo#readme",
+  "author": "Your Name <your-email@example.com>",
+  "license": "MIT",
+  "files": [
+    "dist/",
+    "src/",
+    "mensajes/",
+    "README.md",
+    "API_DOCUMENTATION.md",
+    "DEPLOYMENT.md"
+  ]
 }
